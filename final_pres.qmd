@@ -1,0 +1,858 @@
+---
+title: "NYC Arrests Analysis"
+subtitle: "Statistics 3255 Final Project"
+author: "Kaitlyn Bedard"
+format:
+  revealjs:
+    theme: moon
+    transition: slide 
+    embed-resources: true
+    slide-number: true
+ #   chalkboard: 
+  #    buttons: false
+    preview-links: auto
+   # logo: images/quarto.png
+  #  css: styles.css
+   # footer: "UConn Intro to Data Science: STAT 3255/5255"
+    #code-fold: 
+execute:
+  warning: false
+  error: false
+output:
+  quarto::quarto_presentation:
+    scrollable: true
+resources:
+  - demo.pdf
+---
+
+
+## Outline {.scrollable} 
+- Background Information
+- Data Description and Cleaning
+- Exploratory Analysis and Graphing
+- Hypothesis Testing
+- Modeling Arrest Severity 
+- Conclusions
+
+# Background Information {.scrollable}
+
+## Basics {.scrollable}
+- Chosen Data: NYC Arrests (September 1, 2022 12:00am to October 1, 2022 12:00am)
+- Relevant Variables: 'perp_sex', 'latitude', 'arrest_precinct',  'age_group', 'arrest_boro', 'longitude', 'ofns_desc', 'perp_race', 'law_cat_cd', 'geometry' 
+- Aims: Determine if arrests (the age, sex, race of the offenders, or the description of the offense) vary by location
+
+## Relevant Literature {.scrollable} 
+- <https://ieeexplore.ieee.org/document/9425120>: focus on crime hotspot mapping
+- <https://towardsdatascience.com/analysis-of-nyc-reported-crime-data-using-pandas-821753cd7e22>: focus on changes in crime over time
+- <https://www.kaggle.com/code/adamschroeder/crime-in-new-york-city>: focus on crimes by time of day and by borough
+
+
+# Data Description and Cleaning
+
+## Approach: {.scrollable}
+- Observe percent missing of all variables
+- Observe descriptive statistics of numerical variables
+- Observe frequency tables of categorical variables
+- Make necessary changes from observations
+
+```{python}
+#| echo: false
+
+# load data
+import geopandas as gpd
+
+arrests = gpd.read_file("data/nycarrest_09012022-10012022.geojson")
+arrests.set_crs("EPSG:4326")
+```
+
+```{python}
+#| echo: false
+
+cleaned = arrests.copy()
+
+# removing columns that won't be used (redundant and unneccessary)
+cleaned = arrests.drop(columns=['@computed_region_92fq_4b7q', '@computed_region_efsh_h5xi', '@computed_region_sbqj_enih',
+                                 '@computed_region_yeji_bk3q', '@computed_region_f5dn_yrer', 'arrest_key', 'x_coord_cd', 'y_coord_cd',
+                                 'jurisdiction_code', 'ky_cd', 'pd_cd', 'pd_desc', 'arrest_date'])
+```
+
+```{python}
+#| echo: false
+
+# percent missing; descriptive statistics; categorical frequency tables
+
+print(cleaned.isna().sum() / len(cleaned))
+print(cleaned.describe())
+print(cleaned["arrest_boro"].value_counts(dropna = False))
+print(cleaned["arrest_precinct"].value_counts(dropna = False))
+print(cleaned["perp_sex"].value_counts(dropna = False))
+print(cleaned["age_group"].value_counts(dropna = False))
+print(cleaned["perp_race"].value_counts(dropna = False))
+print(cleaned["law_cat_cd"].value_counts(dropna = False))
+print(cleaned["law_code"].value_counts(dropna = False))
+print(cleaned["ofns_desc"].value_counts(dropna = False))
+```
+
+```{python}
+#| echo: false
+import numpy as np 
+
+# clean codes so we only have misdeamenor, violation, and felony
+cleaned = cleaned.replace(['9', 'I', None], np.nan)
+print(cleaned["law_cat_cd"].value_counts(dropna = False))
+```
+```{python}
+#| echo: false
+
+# imports 
+from uszipcode import SearchEngine
+import numpy as np
+from typing import Union, List
+
+cleaned['latitude'] = cleaned['latitude'].astype(float)
+cleaned['longitude'] = cleaned['longitude'].astype(float)
+
+sr = SearchEngine()
+zipcode = [int(sr.by_coordinates(lat, lng, radius=5)[0].zipcode) for lat, lng in zip(cleaned['latitude'],cleaned['longitude'])]
+```
+
+```{python}
+#| echo: false
+import pandas as pd
+zipcode = pd.Series(zipcode)
+# add the zipcodes as a new column to the dataframe
+cleaned['arrest_zipcode'] =  zipcode.values
+cleaned['arrest_zipcode'] = cleaned['arrest_zipcode'].astype(str)
+```
+
+```{python}
+#| echo: false
+offense_categories = {
+    'Assault': ['ASSAULT 3 & RELATED OFFENSES', 'FELONY ASSAULT'],
+    'Larceny': ['PETIT LARCENY', 'GRAND LARCENY', 'GRAND LARCENY OF MOTOR VEHICLE', ],
+    'Drugs': ['DANGEROUS DRUGS', 'CANNABIS RELATED OFFENSES'],
+    'Robbery': ['ROBBERY'],
+    'Weapons': ['DANGEROUS WEAPONS', 'BURGLAR\'S TOOLS'],
+    'Burglary': ['BURGLARY'],
+    'Fraud': ['OFFENSES INVOLVING FRAUD', 'FRAUDS', 'THEFT-FRAUD', 'FRAUDULENT ACCOSTING'],
+    'Motor Vehicle': ['VEHICLE AND TRAFFIC LAWS', 'UNAUTHORIZED USE OF A VEHICLE', 'HOMICIDE-NEGLIGENT-VEHICLE'],
+    'Sex Crimes': ['SEX CRIMES', 'RAPE', 'PROSTITUTION & RELATED OFFENSES'],
+    'Miscellaneous': ['MISCELLANEOUS PENAL LAW', 'OFFENSES AGAINST PUBLIC ADMINI',
+                      'OFF. AGNST PUB ORD SENSBLTY &', 'FORGERY',
+                      'POSSESSION OF STOLEN PROPERTY', 'NYS LAWS-UNCLASSIFIED FELONY',
+                      'ADMINISTRATIVE CODE', 'THEFT OF SERVICES',
+                      'ENDAN WELFARE INCOMP', 'HARRASSMENT 2', 'KIDNAPPING & RELATED OFFENSES',
+                      'OFFENSES AGAINST PUBLIC SAFETY', 'CHILD ABANDONMENT/NON SUPPORT',
+                      'MOVING INFRACTIONS', 'AGRICULTURE & MRKTS LAW-UNCLASSIFIED',
+                      'OTHER STATE LAWS (NON PENAL LAW)', 'DISORDERLY CONDUCT', 
+                      'HOMICIDE-NEGLIGENT,UNCLASSIFIE',
+                      'LOITERING/GAMBLING (CARDS, DIC', 'ANTICIPATORY OFFENSES',
+                      'DISRUPTION OF A RELIGIOUS SERV', 'OFFENSES RELATED TO CHILDREN',
+                      'JOSTLING']
+}
+for category, offenses in offense_categories.items():
+    cleaned.loc[cleaned['ofns_desc'].isin(offenses), 'ofns_cat'] = category
+```
+
+## Cleaned Data Set {.scrollable}
+
+```{python}
+#| echo: false
+cleaned.head()
+```
+
+# Exploratory Analysis and Mapping
+
+## Arrests by Race {.scrollable}
+```{python}
+#| echo: false
+# # plot by the race of the arrested
+cleaned.explore(column = "perp_race", legend = True)
+```
+
+## Arrests by Age {.scrollable}
+```{python}
+#| echo: false
+cleaned.explore(column = "age_group", legend = True)
+```
+
+## Arrests by Sex {.scrollable} 
+```{python}
+#| echo: false
+cleaned.explore(column = "perp_sex", legend = True)
+```
+
+## Graphing by Zip Codes {.scrollable}
+- Reverse geocode to obtain zipcode of the arrests
+- Grouping variables by zip code to be merges with NYC Zipcodes geojson
+- Can also be done on a borough level or precinct level
+```{python}
+#| echo: false
+import pandas as pd
+
+precincts = gpd.read_file("data/nyc_police_precincts.geojson")
+precincts = precincts.rename(columns={"precinct":"arrest_precinct"})
+
+boros = gpd.read_file("data/nyc_boroughs.geojson")
+boros.head()
+abbrev_map = {"Bronx": "B", "Staten Island": "S", "Brooklyn": "K", "Manhattan": "M", "Queens": "Q"}
+boros["arrest_boro"] = boros["boro_name"].map(abbrev_map)
+
+zipcodes = gpd.read_file('data/nyc_zipcodes.geojson')
+zipcodes = zipcodes.rename(columns={"ZIPCODE":"arrest_zipcode"})
+```
+
+## Zipcode by Most Frequent Age {.scrollable}
+```{python}
+#| echo: false
+# zip by age
+age_counts = cleaned.groupby(['arrest_zipcode', 'age_group']).size().reset_index(name='count')
+idx = age_counts.groupby('arrest_zipcode')['count'].idxmax()
+max_counts = age_counts.loc[idx]
+max_counts = max_counts.drop(columns='count')
+zipcodes = zipcodes.merge(max_counts, on='arrest_zipcode')
+zipcodes.explore(column="age_group", legend = True)
+```
+
+## Zipcode by Most Frequent Race {.scrollable}
+```{python}
+#| echo: false
+
+# zip by race
+race_counts = cleaned.groupby(['arrest_zipcode', 'perp_race']).size().reset_index(name='count')
+idx = race_counts.groupby('arrest_zipcode')['count'].idxmax()
+max_race_counts = race_counts.loc[idx]
+max_race_counts = max_race_counts.drop(columns='count')
+zipcodes = zipcodes.merge(max_race_counts, on='arrest_zipcode')
+zipcodes.explore(column="perp_race", legend=True)
+```
+
+## Zipcode by Most Frequent Sex {.scrollable}
+```{python}
+#| echo: false
+
+# zip by sex
+sex_counts = cleaned.groupby(['arrest_zipcode', 'perp_sex']).size().reset_index(name='count')
+idx = sex_counts.groupby('arrest_zipcode')['count'].idxmax()
+max_sex_counts = sex_counts.loc[idx]
+max_sex_counts = max_sex_counts.drop(columns='count')
+zipcodes = zipcodes.merge(max_sex_counts, on='arrest_zipcode')
+zipcodes.explore(column="perp_sex", legend=True)
+```
+
+## Zipcode by Most Frequent Offense {.scrollable}
+```{python}
+#| echo: false
+# zip by description
+desc_counts = cleaned.groupby(['arrest_zipcode', 'ofns_desc']).size().reset_index(name='count')
+idx = desc_counts.groupby('arrest_zipcode')['count'].idxmax()
+max_desc_counts = desc_counts.loc[idx]
+max_desc_counts = max_desc_counts.drop(columns='count')
+zipcodes = zipcodes.merge(max_desc_counts, on='arrest_zipcode')
+zipcodes.explore(column='ofns_desc', legend = True)
+```
+
+## Borough Distribution of Offense Type {.scrollable} 
+```{python}
+import matplotlib.pyplot as plt
+# group the data by borough and offense category, and count the number of occurrences in each group
+counts = cleaned.groupby(['arrest_boro', 'ofns_cat']).size().unstack()
+prop_counts = counts.apply(lambda x: x / x.sum(), axis=1)
+
+# plot the stacked bar chart
+prop_counts.plot(kind='bar', stacked=True)
+plt.title('Offense Categories by Borough')
+plt.xlabel('Borough')
+plt.ylabel('Proportion')
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.show()
+
+```
+# Hypothesis Testing
+
+
+## Test Results {.scrollable}
+- Using a Chi-Squared test of independence to determine if zipcode is associated with: race, age, or sex of perpetrator
+- All results show an association
+- Further analysis needed
+```{python}
+#| echo: false
+
+import pandas as pd
+from scipy.stats import chi2_contingency
+
+# create a contingency table of perpetrator race and zipcode
+cont_table = pd.crosstab(cleaned['perp_race'], cleaned['arrest_zipcode'])
+# perform the chi-squared test of independence
+chi2, pval, dof, expected = chi2_contingency(cont_table)
+# print the results
+print("Results of Zipcode and Race:")
+print('\tChi-squared statistic:', chi2)
+print('\tP-value:', pval)
+
+
+# sex and zipcode
+cont_table = pd.crosstab(cleaned['perp_sex'], cleaned['arrest_zipcode'])
+chi2, pval, dof, expected = chi2_contingency(cont_table)
+print("Results of Zipcode and Sex:")
+print('\tChi-squared statistic:', chi2)
+print('\tP-value:', pval)
+
+# age and zipcode
+cont_table = pd.crosstab(cleaned['age_group'], cleaned['arrest_zipcode'])
+chi2, pval, dof, expected = chi2_contingency(cont_table)
+print("Results of Zipcode and Age:")
+print('\tChi-squared statistic:', chi2)
+print('\tP-value:', pval)
+
+```
+
+## Race and Zipcode {.scrollable}
+```{python}
+#| echo: false
+# randomly select 50 zip codes
+random_sample = cleaned['arrest_zipcode'].dropna().unique().tolist()
+random_sample = np.random.choice(random_sample, size=50, replace=False)
+
+# group the data by zipcode and race group and count the number of rows
+grouped_data = cleaned.groupby(['arrest_zipcode', 'perp_race']).size().unstack()
+
+# select only the rows corresponding to the random sample
+grouped_data = grouped_data.loc[random_sample]
+
+# get proportions
+grouped_data = grouped_data.div(grouped_data.sum(axis=1), axis=0)
+
+# plot as stacked bar chart
+grouped_data.plot.bar(stacked=True, figsize=(10, 6))
+```
+
+## Top Zipcodes by Race {.scrollable}
+```{python}
+#| echo: false
+
+# create generalized categories
+results_df = pd.DataFrame({
+    'AMERICAN INDIAN/ALASKAN NATIVE': cleaned[cleaned['perp_race'] == 'AMERICAN INDIAN/ALASKAN NATIVE']['arrest_zipcode'].value_counts(),
+    'ASIAN / PACIFIC ISLANDER': cleaned[cleaned['perp_race'] == 'ASIAN / PACIFIC ISLANDER']['arrest_zipcode'].value_counts(),
+    'BLACK': cleaned[cleaned['perp_race'] == 'BLACK']['arrest_zipcode'].value_counts(),
+    'BLACK HISPANIC': cleaned[cleaned['perp_race'] == 'BLACK HISPANIC']['arrest_zipcode'].value_counts(),
+    'UNKNOWN': cleaned[cleaned['perp_race'] == 'UNKNOWN']['arrest_zipcode'].value_counts(), 
+    'WHITE': cleaned[cleaned['perp_race'] == 'WHITE']['arrest_zipcode'].value_counts(),
+    'WHITE HISPANIC': cleaned[cleaned['perp_race'] == 'WHITE HISPANIC']['arrest_zipcode'].value_counts(),
+})
+results_df['Total'] = results_df.sum(axis=1)
+
+
+# Calculate proportions for each race group
+results_df['Proportion AMERICAN INDIAN/ALASKAN NATIVE'] = results_df['AMERICAN INDIAN/ALASKAN NATIVE'] / results_df['Total']
+results_df['Proportion ASIAN / PACIFIC ISLANDER'] = results_df['ASIAN / PACIFIC ISLANDER'] / results_df['Total']
+results_df['Proportion BLACK'] = results_df['BLACK'] / results_df['Total']
+results_df['Proportion BLACK HISPANIC'] = results_df['BLACK HISPANIC'] / results_df['Total']
+results_df['Proportion UNKNOWN'] = results_df['UNKNOWN'] / results_df['Total']
+results_df['Proportion WHITE'] = results_df['WHITE'] / results_df['Total']
+results_df['Proportion WHITE HISPANIC'] = results_df['WHITE HISPANIC'] / results_df['Total']
+
+
+# creating top 10 zipcode proportions of each race 
+top_native = results_df.sort_values(by='Proportion AMERICAN INDIAN/ALASKAN NATIVE', ascending=False).head(10)['Proportion AMERICAN INDIAN/ALASKAN NATIVE']
+top_asian = results_df.sort_values(by='Proportion ASIAN / PACIFIC ISLANDER', ascending=False).head(10)['Proportion ASIAN / PACIFIC ISLANDER']
+top_black = results_df.sort_values(by='Proportion BLACK', ascending=False).head(10)['Proportion BLACK']
+top_black_hisp = results_df.sort_values(by='Proportion BLACK HISPANIC', ascending=False).head(10)['Proportion BLACK HISPANIC']
+top_unknown = results_df.sort_values(by='Proportion UNKNOWN', ascending=False).head(10)['Proportion UNKNOWN']
+top_white = results_df.sort_values(by='Proportion WHITE', ascending=False).head(10)['Proportion WHITE']
+top_white_hisp = results_df.sort_values(by='Proportion WHITE HISPANIC', ascending=False).head(10)['Proportion WHITE HISPANIC']
+
+# plot 
+import matplotlib.pyplot as plt
+fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(12, 8))
+axs = axs.ravel()  
+
+top_native.plot(kind='bar', y='Proportion AMERICAN INDIAN/ALASKAN NATIVE', color ='blue', ax=axs[0])
+axs[0].set_title('Native American Perpetrators')
+axs[0].set_xlabel('Zipcodes')
+axs[0].set_ylabel('Proportion')
+
+top_asian.plot(kind='bar', y='Proportion ASIAN / PACIFIC ISLANDER', color='orange', ax=axs[1])
+axs[1].set_title('Asian/Pacific Islander Perpetrators')
+axs[1].set_xlabel('Zipcodes')
+axs[1].set_ylabel('Proportion')
+
+top_black.plot(kind='bar', y='Proportion BLACK', color = 'green', ax=axs[2])
+axs[2].set_title('Black Perpetrators')
+axs[2].set_xlabel('Zipcodes')
+axs[2].set_ylabel('Proportion')
+
+top_black_hisp.plot(kind='bar', y='Proportion BLACK HISPANIC', color = 'red', ax=axs[3])
+axs[3].set_title('Black Hispanic Perpetrators')
+axs[3].set_xlabel('Zipcodes')
+axs[3].set_ylabel('Proportion')
+
+top_white.plot(kind='bar', y='Proportion WHITE', color = 'brown', ax=axs[4])
+axs[4].set_title('White Perpetrators')
+axs[4].set_xlabel('Zipcodes')
+axs[4].set_ylabel('Proportion')
+
+top_white_hisp.plot(kind='bar', y='Proportion WHITE HISPANIC', color = 'pink', ax=axs[5])
+axs[5].set_title('White Hispanic Perpetrators')
+axs[5].set_xlabel('Zipcodes')
+axs[5].set_ylabel('Proportion')
+
+fig.tight_layout() 
+plt.show()
+```
+
+## Zipcode and Sex {.scrollable}
+```{python}
+#| echo: false
+import pandas as pd
+import matplotlib.pyplot as plt
+
+random_sample = cleaned['arrest_zipcode'].dropna().unique().tolist()
+random_sample = np.random.choice(random_sample, size=75, replace=False)
+grouped_data = cleaned.groupby(['arrest_zipcode', 'perp_sex']).size().unstack()
+grouped_data = grouped_data.loc[random_sample]
+grouped_data = grouped_data.div(grouped_data.sum(axis=1), axis=0)
+grouped_data.plot.bar(stacked=True, figsize=(10, 6))
+```
+
+## Top Zipcodes by Sex {.scrollable}
+```{python}
+#| echo: false
+
+results_df = pd.DataFrame({
+    'Males': cleaned[cleaned['perp_sex'] == 'M']['arrest_zipcode'].value_counts(),
+    'Females': cleaned[cleaned['perp_sex'] == 'F']['arrest_zipcode'].value_counts()
+})
+
+# find proportions
+results_df['Proportion Female'] = results_df['Females'] / (results_df['Females'] + results_df['Males'])
+results_df['Proportion Male'] = results_df['Males'] / (results_df['Males'] + results_df['Females'])
+
+results = results_df.sort_values('Proportion Male', ascending=False).iloc[:250].dropna()
+
+top_20 = results.head(20)
+bottom_20 = results.tail(20)
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(11.69, 8.27/2))
+
+bottom_20.plot(kind='bar', y='Proportion Male', color='orange', ax=axs[0])
+axs[0].set_title('Proportion of Male Perpetrators')
+axs[0].set_xlabel('Zipcodes')
+axs[0].set_ylabel('Proportion')
+
+bottom_20.plot(kind='bar', y='Proportion Female', color='blue', ax=axs[1])
+axs[1].set_title('Proportion of Females Perpetrators')
+axs[1].set_xlabel('Zipcodes')
+axs[1].set_ylabel('Proportion')
+
+plt.tight_layout()
+plt.show()
+```
+
+## Zipcode and Age {.scrollable} 
+```{python}
+#| echo: false
+random_sample = cleaned['arrest_zipcode'].dropna().unique().tolist()
+random_sample = np.random.choice(random_sample, size=75, replace=False)
+grouped_data = cleaned.groupby(['arrest_zipcode', 'age_group']).size().unstack()
+grouped_data = grouped_data.loc[random_sample]
+grouped_data = grouped_data.div(grouped_data.sum(axis=1), axis=0)
+grouped_data.plot.bar(stacked=True, figsize=(10, 6))
+```
+
+## Top Zipcodes by Age {.scrollable}
+```{python}
+#| echo: false
+results_df = pd.DataFrame({
+    '18-24': cleaned[cleaned['age_group'] == '18-24']['arrest_zipcode'].value_counts(),
+    '25-44': cleaned[cleaned['age_group'] == '25-44']['arrest_zipcode'].value_counts(),
+    '45-64': cleaned[cleaned['age_group'] == '45-64']['arrest_zipcode'].value_counts(),
+    '65+': cleaned[cleaned['age_group'] == '65+']['arrest_zipcode'].value_counts(),
+    '<18': cleaned[cleaned['age_group'] == '<18']['arrest_zipcode'].value_counts(),
+})
+results_df['Total'] = results_df.sum(axis=1)
+
+# Calculate proportions for each age group
+results_df['Proportion 18-24'] = results_df['18-24'] / results_df['Total']
+results_df['Proportion 25-44'] = results_df['25-44'] / results_df['Total']
+results_df['Proportion 45-64'] = results_df['45-64'] / results_df['Total']
+results_df['Proportion 65+'] = results_df['65+'] / results_df['Total']
+results_df['Proportion <18'] = results_df['<18'] / results_df['Total']
+results_df.head()
+
+# creating top 10 of each age group
+top_18_24 = results_df.sort_values(by='Proportion 18-24', ascending=False).head(10)['Proportion 18-24']
+top_25_44 = results_df.sort_values(by='Proportion 25-44', ascending=False).head(10)['Proportion 25-44']
+top_45_64 = results_df.sort_values(by='Proportion 45-64', ascending=False).head(10)['Proportion 45-64']
+top_65 = results_df.sort_values(by='Proportion 65+', ascending=False).head(10)['Proportion 65+']
+top_18 = results_df.sort_values(by='Proportion <18', ascending=False).head(10)['Proportion <18']
+
+# plot
+fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(11.69, 8.27))
+
+top_18_24.plot(kind='bar', y='Proportion 18-24', color='blue', ax=axs[0][0])
+axs[0][0].set_title('Proportion of 18-24 Perpetrators')
+axs[0][0].set_xlabel('Zipcodes')
+axs[0][0].set_ylabel('Proportion')
+
+top_25_44.plot(kind='bar', y='Proportion 25-44', color='orange', ax=axs[0][1])
+axs[0][1].set_title('Proportion of 25-44 Perpetrators')
+axs[0][1].set_xlabel('Zipcodes')
+axs[0][1].set_ylabel('Proportion')
+
+top_45_64.plot(kind='bar', y='Proportion 45-64', color='green', ax=axs[0][2])
+axs[0][2].set_title('Proportion of 45-64 Perpetrators')
+axs[0][2].set_xlabel('Zipcodes')
+axs[0][2].set_ylabel('Proportion')
+
+top_65.plot(kind='bar', y='Proportion 65+', color='red', ax=axs[1][0])
+axs[1][0].set_title('Proportion of 65+ Perpetrators')
+axs[1][0].set_xlabel('Zipcodes')
+axs[1][0].set_ylabel('Proportion')
+
+top_18.plot(kind='bar', y='Proportion <18', color='purple', ax=axs[1][1])
+axs[1][1].set_title('Proportion of <18 Perpetrators')
+axs[1][1].set_xlabel('Zipcodes')
+axs[1][1].set_ylabel('Proportion')
+axs[1][2].axis('off')
+
+plt.tight_layout()
+plt.show()
+```
+
+## Offenses Committed Near Schools {.scrollable}
+```{python}
+#| echo: false
+
+# loading schools and creating buffer 
+schools = gpd.read_file("data/nyc_public_schools/Public_Schools_Points_2011-2012A.shp")
+
+# highschools = schools[schools['SCH_TYPE']=="High school"]
+
+schools_buffer = schools.buffer(400)
+
+cleaned = cleaned.to_crs(schools.crs)
+
+cleaned["near_school"] = cleaned.geometry.apply(lambda x: schools_buffer.contains(x).any())
+
+```
+```{python}
+#| echo: false
+import pandas as pd
+from scipy.stats import chi2_contingency
+import matplotlib.pyplot as plt
+
+# tests if proximity to school is associated with the arrest category
+contingency_table = pd.crosstab(cleaned['near_school'], cleaned['ofns_cat'])
+chi2, pval, dof, expected = chi2_contingency(contingency_table)
+print("Chi-squared test statistic: ", chi2)
+print("p-value: ", pval)
+
+# proportions 
+results_df = pd.DataFrame({
+    'Near School Offenses': cleaned[cleaned['near_school'] == True]['ofns_cat'].value_counts(),
+    'Far School Offenses': cleaned[cleaned['near_school'] == False]['ofns_cat'].value_counts()
+})
+results_df['Near School Proportion'] = results_df['Near School Offenses'] / (results_df['Near School Offenses'] + results_df['Far School Offenses'])
+
+# plot
+top_10 = results_df.head(10)
+top_10.plot(kind='bar', y='Near School Proportion')
+plt.title('Proportion of Offenses Near Schools')
+plt.xlabel('Offense Category')
+plt.ylabel('Proportion')
+plt.show()
+```
+
+## Sex Crimes Near Schools {.scrollable} 
+```{python}
+#| echo: false
+import matplotlib.pyplot as plt
+
+sex_crimes = cleaned[cleaned['ofns_cat'] == "Sex Crimes"]
+fig, ax = plt.subplots(figsize=(10, 10))
+
+# plot schools
+schools.plot(ax=ax, color='red', markersize=30)
+
+# plot sex crime arrests
+sex_crimes.plot(ax=ax, color='blue', markersize=10)
+
+ax.set_title('Schools and Sex Crime Offenses')
+plt.show()
+```
+
+# Modeling Arrest Severity
+
+## Variables {.scrollable}
+- Dependent: `severe` - True for Felony, False otherwise
+- Independents: 'arrest_boro', 'arrest_zipcode', 'perp_race', 'perp_sex', 'age_group', 'Population Density', 'Zip Home Value', 'Zip Income', 'ofns_cat'
+- Information merged from uszipcodes database
+
+```{python}
+#| echo: false
+cleaned["severe"] = (cleaned['law_cat_cd'] == "F")
+cleaned.head()
+print(cleaned["severe"].value_counts(dropna = False))
+```
+
+```{python}
+#| echo: false
+import pandas as pd
+from uszipcode import SearchEngine
+
+search = SearchEngine()
+
+zipcode_info = []
+# Extract the relevant information
+for zip in cleaned["arrest_zipcode"].unique():
+    zipcode = search.by_zipcode(zip)
+    if zipcode:
+        zipcode_info.append({
+            "Zipcode": zipcode.zipcode,
+            "Zip Radius": zipcode.radius_in_miles,
+            "Population": zipcode.population,
+            "Population Density": zipcode.population_density,
+            "Land Area": zipcode.land_area_in_sqmi,
+            "Water Area": zipcode.water_area_in_sqmi,
+            "Zip Home Value": zipcode.median_home_value,
+            "Zip Income": zipcode.median_household_income
+        })
+
+# dataframe from the list of zipcode information
+zipcode_df = pd.DataFrame(zipcode_info)
+
+# Merge
+merged_df = pd.merge(cleaned, zipcode_df, left_on="arrest_zipcode", right_on="Zipcode", how="left")
+
+merged_df.to_csv('data/arrests_zip_merge.csv')
+```
+
+```{python}
+#| echo: false
+arrest_zip = pd.read_csv('data/arrests_zip_merge.csv')
+arrest_zip.head()
+```
+
+
+## Logistic Regression {.scrollable}
+```{python}
+#| echo: false
+from sklearn.model_selection import train_test_split, GridSearchCV
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix, \
+accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+
+# define independent and dependent variables
+data = arrest_zip[['arrest_boro', 'arrest_zipcode', 'perp_race', 'perp_sex', 'age_group', 'Population Density', 'Zip Home Value', 'Zip Income', 'severe', 'ofns_cat']]
+data = data.dropna()
+X = data[['arrest_boro', 'arrest_zipcode', 'perp_race', 'perp_sex', 'age_group', 'Population Density', 'Zip Home Value', 'Zip Income', 'ofns_cat']]
+y = data['severe']
+
+# Create dummy variables for categorical variables
+X = pd.get_dummies(X, columns=['arrest_boro', 'arrest_zipcode', 'perp_race', 'perp_sex', 'age_group', 'ofns_cat'])
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+logreg = LogisticRegression()
+# parameter grid
+param_grid = {
+    'penalty': ['l1', 'l2'],
+    'C': [0.01, 0.1, 1, 10, 100],
+    'solver': ['liblinear', 'saga']
+}
+grid_search = GridSearchCV(logreg, param_grid, cv=5)
+grid_search.fit(X_train, y_train)
+
+print(f'Best hyperparameters: {grid_search.best_params_}')
+
+best_logreg = grid_search.best_estimator_
+
+coef = best_logreg.coef_
+intercept = best_logreg.intercept_
+y_pred = best_logreg.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+# Precision
+log_precision = precision_score(y_test, y_pred)
+# Recall
+log_recall = recall_score(y_test, y_pred)
+# F1-score
+log_f1 = f1_score(y_test, y_pred)
+# AUC
+log_auc = roc_auc_score(y_test, y_pred)
+# Get the feature names from the dataset
+feature_names = X.columns
+
+print("Accuracy on test set:", accuracy)
+print("Precision:", log_precision)
+print("Recall:", log_recall)
+print("F1-score:", log_f1)
+print("AUC:", log_auc)
+# Print the coefficients for each feature
+#for feature, coef in zip(feature_names, best_logreg.coef_[0]):
+ #   print(f"{feature}: {coef}")
+
+```
+
+
+
+## Decision Tree {.scrollable}
+```{python}
+#| echo: false
+from sklearn.tree import DecisionTreeClassifier
+
+from sklearn.metrics import confusion_matrix, \
+accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+param_grid = {'criterion': ['gini', 'entropy'],
+              'max_depth': [10, 15, 20],
+              'min_impurity_decrease': [1e-4, 1e-3, 1e-2],
+              'ccp_alpha': [0.0, 1e-5, 1e-4, 1e-3]}
+
+tree_clf = DecisionTreeClassifier()
+grid_search = GridSearchCV(tree_clf, param_grid, cv=5, scoring='f1')
+grid_search.fit(X_train, y_train)
+
+grid_search.best_params_
+print("Best hyperparameters:", grid_search.best_params_)
+
+# Evaluate the model on the test set using the best hyperparameters
+best_clf = grid_search.best_estimator_
+y_pred = best_clf.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+
+# Precision
+tree_precision = precision_score(y_test, y_pred)
+# Recall
+tree_recall = recall_score(y_test, y_pred)
+# F1-score
+tree_f1 = f1_score(y_test, y_pred)
+# AUC
+tree_auc = roc_auc_score(y_test, y_pred)
+print("Accuracy on test set:", accuracy)
+print("Precision:", tree_precision)
+print("Recall:", tree_recall)
+print("F1-score:", tree_f1)
+print("AUC:", tree_auc)
+```
+## Decision Tree Feature Importance {.scrollable}
+```{python}
+#| echo: false
+
+# Get the feature names from the dataset
+feature_names = X.columns
+
+# Get the feature importances
+importances = best_clf.feature_importances_
+sorted_importance_index = np.argsort(importances)[::-1]
+top_features = [feature_names[i] for i in sorted_importance_index[:20]]
+top_importances = [importances[i] for i in sorted_importance_index[:20]]
+
+# bar chart of the top 20 features
+plt.bar(range(len(top_features)), top_importances)
+plt.xticks(range(len(top_features)), top_features, rotation=90)
+plt.xlabel('Feature')
+plt.ylabel('Importance')
+plt.title('Top 20 Feature Importances for Decision Tree')
+plt.show()
+```
+
+## Random Forest {.scrollable}
+```{python}
+from sklearn.ensemble import RandomForestClassifier
+param_grid = {
+    'n_estimators': [50, 100, 200],
+    'max_depth': [5, 10, 20],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4]
+}
+
+# random forest classifier
+rfc = RandomForestClassifier(random_state=42)
+grid_search = GridSearchCV(estimator=rfc, param_grid=param_grid, cv=5)
+grid_search.fit(X_train, y_train)
+print(f'Best hyperparameters: {grid_search.best_params_}')
+
+best_rfc = grid_search.best_estimator_
+y_pred = best_rfc.predict(X_test)
+```
+
+
+```{python}
+#| echo: false
+print(f'Best hyperparameters: {grid_search.best_params_}')
+accuracy = accuracy_score(y_test, y_pred)
+
+# Precision
+rf_precision = precision_score(y_test, y_pred)
+# Recall
+rf_recall = recall_score(y_test, y_pred)
+# F1-score
+rf_f1 = f1_score(y_test, y_pred)
+# AUC
+rf_auc = roc_auc_score(y_test, y_pred)
+print("Accuracy on test set:", accuracy)
+print("Precision:", rf_precision)
+print("Recall:", rf_recall)
+print("F1-score:", rf_f1)
+print("AUC:", rf_auc)
+```
+## Random Forest Feature Importance {.scrollable} 
+```{python}
+importances = best_rfc.feature_importances_
+sorted_importance_index = np.argsort(importances)[::-1]
+top_features = [feature_names[i] for i in sorted_importance_index[:20]]
+top_importances = [importances[i] for i in sorted_importance_index[:20]]
+
+# bar chart of the top 20 features
+plt.bar(range(len(top_features)), top_importances)
+plt.xticks(range(len(top_features)), top_features, rotation=90)
+plt.xlabel('Feature')
+plt.ylabel('Importance')
+plt.title('Top 20 Feature Importances for Random Forest')
+plt.show()
+```
+
+## ROC Curve Comparisions {.scrollable} 
+```{python}
+from sklearn.metrics import roc_curve
+import matplotlib.pyplot as plt
+
+# Logistic Regression
+fpr_lr, tpr_lr, thresholds_lr = roc_curve(y_test, best_logreg.predict_proba(X_test)[:,1])
+auc_lr = roc_auc_score(y_test, best_logreg.predict(X_test))
+
+# Decision Tree
+fpr_dt, tpr_dt, thresholds_dt = roc_curve(y_test, best_clf.predict_proba(X_test)[:,1])
+auc_dt = roc_auc_score(y_test, best_clf.predict(X_test))
+
+# Random Forest
+fpr_rf, tpr_rf, thresholds_rf = roc_curve(y_test, best_rfc.predict_proba(X_test)[:,1])
+auc_rf = roc_auc_score(y_test, best_rfc.predict(X_test))
+
+# Plot ROC curves
+plt.plot(fpr_lr, tpr_lr, label='Logistic Regression (AUC = {:.3f})'.format(auc_lr))
+plt.plot(fpr_dt, tpr_dt, label='Decision Tree (AUC = {:.3f})'.format(auc_dt))
+plt.plot(fpr_rf, tpr_rf, label='Random Forest (AUC = {:.3f})'.format(auc_rf))
+
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.plot([0, 1], [0, 1], label = 'Random Classifier (AUC = 0.5)')
+plt.legend()
+plt.show()
+```
+
+##  Limitations
+- Month of arrest data is not entirely representative
+- Observations made in this presentation require further analysis to make any definite conclusions
+- For the severity model: the limited variety of features may be more simple than the truth
+
+## Conclusions {.scrollable}
+- Zipcode seems to be associated with the age, race, and sex of the perpetrator (police profiling?)
+- Robbery and burglary are more likely to be severe crimes, wheras fraud, larceny and motor vehicle crimes are not severe
+- Zipcodes with higher population density and income may have more severe crime 
+- Black perpetrators are more likely to be arrested for severe crimes
+- Those over 45 tend to be arrested for less severe crimes
