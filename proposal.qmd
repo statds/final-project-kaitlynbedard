@@ -1,0 +1,55 @@
+---
+title: "Final Project Proposal"
+author: "Kaitlyn Bedard"
+format:
+  html:
+    code-fold: true
+    embed-resources: true
+execute:
+  warning: false
+  error: false
+jupyter: python3
+---
+
+# Introduction 
+
+My chosen data set is the NYPD Arrest Data (Year to Date) from NYC Open Data. I am choosing a sample of the data -- specifically from September 1, 2022 12:00am to October 1, 2022 12:00am. I have chosen this topic because I am interested in doing exploratory analysis of the distributions of the various arrests across boroughs and across different factors such as age, race, and sex of the offender. 
+
+# Specific aims 
+
+I have a few main research interests in analyzing the NYC arrest data:
+
+* Do the arrests vary by geographic location?
+
+* Do demographic factors such as age, sex, and race affect arrests?
+
+* Based on these examined factors, can we create a model that determines the severity of an arrest? 
+  + I will treat a severe arrest as a felony and a non-severe arrest as either a misdemeanor or a violation.
+
+Answering these questions can give insight into potential disparities that exist in NYC -- whether they be related to geographic or social factors.
+
+# Data description
+
+As mentioned above, the chosen data set is NYC Arrest Data (September 1, 2022 12:00am to October 1, 2022 12:00am). The source of the data is <https://data.cityofnewyork.us/Public-Safety/NYPD-Arrest-Data-Year-to-Date-/uip8-fykc>. This can be downloaded as a GEOjson file -- allowing us to use geopandas immediately. 
+
+```{python}
+import geopandas as gpd
+
+arrests = gpd.read_file("data/nycarrest_09012022-10012022.geojson")
+arrests.set_crs("EPSG:4326")
+
+print(arrests.shape)
+print(list(arrests))
+arrests.head()
+```
+
+From the above code, we see that there are 16,309 observations and 24 variables in the data. These variables are mainly categorical variables, with the exception of coordinate information. Out of the 24 variables, I am most interested in `perp_sex`, `age_group`, `perp_race`, `arrest_boro`, `law_cat_cd` (level of offense), `pd_desc`, `ofns_desc`, and the point geometry column (mainly for visualization purposes).
+
+# Research design/methods/schedule
+
+My plan of action is to, firstly, clean the data. In this process, I will do basic exploration of the data in order to gain a better understanding of trends as well as potential problems that need to be addressed in the cleaning step. I will also provide data visualizations, such as the average number of arrests per borough, or the distribution of the number of arrests by factors such as age, sex, and race. These visualizations will aid the statistical testing that will be performed. I expect to use ANOVA or Kruskal-Wallis tests to determine if the number of arrests varies across the above mentioned factors. Finally, I plan to experiment with various statistical models -- such as logistic regression, decision trees, or random forests in order to build a model to predict the severity of an arrest.
+
+
+# Discussion and Conclusion 
+
+In my final project, I will analyze the NYC arrests data to examine if certain factors such as borough of the arrest, or race, age, and sex of the perpetrator have an affect on the arrests. I will then explore different approaches in order to model the severity of an arrest. I do expect to find that there are some disparities regarding the sex, age, and race of perpetrators, as I am aware that there are existing trends and injustices in the criminal justice system. I believe that my project will most likely corroborate existing results and assumptions. However, if my results are not as expected, this will still provide interesting insight into NYC's criminal justice system.
